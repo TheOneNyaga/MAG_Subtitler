@@ -50,7 +50,7 @@ REQUIREMENTS
 
     // ============================ CONFIG ============================
     var SCRIPT_NAME     = "MAG Subtitler";
-    var SCRIPT_VERSION  = "3.9.1";
+    var SCRIPT_VERSION  = "3.10.1";
     var REPO_URL        = "https://github.com/TheOneNyaga/MAG_Subtitler";
     var SETTINGS_SEC    = "MAG_Subtitler";
     var CONTROLLER_NAME = "SUB_CONTROLLER";
@@ -662,6 +662,42 @@ REQUIREMENTS
         L.applyPreset(f);
         var tmin = minKeyTimeOfLayer(L);
         if (tmin !== null) shiftLayerKeys(L, target - tmin);
+    }
+    function layerKeyExtent(L) {
+        var lo=null, hi=null;
+        eachKeyedProp(L, function(p){
+            var a=p.keyTime(1), b=p.keyTime(p.numKeys);
+            if (lo===null||a<lo) lo=a;
+            if (hi===null||b>hi) hi=b;
+        });
+        return (lo===null)?null:{lo:lo,hi:hi};
+    }
+    function fitCueAnim(L, targetLen) {
+        // Anchor the animation start to the cue In and scale its length so it
+        // finishes within the cue. targetLen<=0 means "squeeze to cue only if
+        // it currently overruns"; targetLen>0 sets an explicit length (capped
+        // at the cue duration). Returns true if it touched any keys.
+        var ext = layerKeyExtent(L); if (!ext) return false;
+        var span = ext.hi - ext.lo;
+        var cueDur = Math.max(0.05, L.outPoint - L.inPoint);
+        var desired = (targetLen > 0) ? Math.min(targetLen, cueDur) : Math.min(span, cueDur);
+        var factor = (span > 0) ? (desired / span) : 1;
+        var shiftRight = (L.inPoint - ext.lo) > 0.0005;   // ordering to avoid key collisions
+        eachKeyedProp(L, function(p){
+            var times=[]; for (var i=1;i<=p.numKeys;i++) times.push(p.keyTime(i));
+            var nt=[]; for (i=0;i<times.length;i++) nt.push(L.inPoint + (times[i]-ext.lo)*factor);
+            if (shiftRight) { for (i=times.length;i>=1;i--){ try{ p.setKeyTime(i, nt[i-1]); }catch(e1){} } }
+            else            { for (i=1;i<=times.length;i++){ try{ p.setKeyTime(i, nt[i-1]); }catch(e2){} } }
+        });
+        return true;
+    }
+    function fitAnimToCues(targetLen) {
+        var subComp=findSubComp(); if(!subComp){ alert("Import first."); return 0; }
+        app.beginUndoGroup("MAG: Fit Animation to Cues");
+        var n=0;
+        try { eachCue(subComp, function(L){ if (fitCueAnim(L, targetLen)) n++; }); }
+        finally { app.endUndoGroup(); }
+        return n;
     }
     function realignAllAnimation() {
         var subComp = findSubComp(); if (!subComp) { alert("Import first."); return 0; }
@@ -1613,7 +1649,13 @@ REQUIREMENTS
         var ffxSelBtn=ffxBtnRow.add("button",undefined,"Apply to Selected Cue");
         var ffxFixRow=ffxGrp.add("group");
         var ffxRealignBtn=ffxFixRow.add("button",undefined,"Realign Animation to Cue In");
-        ffxFixRow.add("statictext",undefined,"(fixes keyframes stuck at comp start)");
+        ffxFixRow.add("statictext",undefined,"(start only)");
+        var ffxFitRow=ffxGrp.add("group");
+        ffxFitRow.add("statictext",undefined,"Anim length (s):");
+        var ffxLenInput=ffxFitRow.add("edittext",undefined,getSetting("animFitLen","")); ffxLenInput.characters=6;
+        var ffxFitAllBtn=ffxFitRow.add("button",undefined,"Fit All Cues");
+        var ffxFitSelBtn=ffxFitRow.add("button",undefined,"Fit Selected");
+        ffxFitRow.add("statictext",undefined,"(blank/0 = squeeze to cue)");
         ffxGrp.add("statictext",undefined,"Presets stack: run preset 'None' above to strip animators first.");
 
         // ---------------- TAB: Sync ----------------
@@ -1690,7 +1732,7 @@ REQUIREMENTS
         var tAbout = tabs.add("tab", undefined, "About");
         tAbout.orientation="column"; tAbout.alignChildren=["fill","top"]; tAbout.spacing=8; tAbout.margins=10;
 
-        var asciiLines = [
+        var BANNER = [
             " /$$$$$$$$ /$$                  /$$$$$$",
             "|__  $$__/| $$                 /$$__  $$",
             "   | $$   | $$$$$$$   /$$$$$$ | $$  \\ $$ /$$$$$$$   /$$$$$$",
@@ -1712,11 +1754,12 @@ REQUIREMENTS
             "          |  $$$$$$/          |  $$$$$$/",
             "           \\______/            \\______/"
         ];
-        var asciiBox = tAbout.add("edittext", [0,0,360,235], asciiLines.join("\n"), {multiline:true, readonly:true, scrolling:true});
-        try { asciiBox.graphics.font = ScriptUI.newFont("Consolas", "REGULAR", 9); } catch(eAF) { try { asciiBox.graphics.font = ScriptUI.newFont("Courier New", "REGULAR", 9); } catch(eAF2) {} }
+        var asciiBox = tAbout.add("statictext", [0,0,360,270], BANNER.join("\n"), {multiline:true});
+        try { asciiBox.graphics.font = ScriptUI.newFont("Courier New", ScriptUI.FontStyle.REGULAR, 9); }
+        catch(eAF) { try { asciiBox.graphics.font = ScriptUI.newFont("Consolas", ScriptUI.FontStyle.REGULAR, 9); } catch(eAF2) {} }
 
         var aboutTitle = tAbout.add("statictext", undefined, "MAG Subtitler  v" + SCRIPT_VERSION);
-        try { aboutTitle.graphics.font = ScriptUI.newFont("dialog", "BOLD", 15); } catch(eAT) {}
+        try { aboutTitle.graphics.font = ScriptUI.newFont("dialog", ScriptUI.FontStyle.BOLD, 15); } catch(eAT) {}
         tAbout.add("statictext", undefined, "After Effects subtitle toolkit");
         tAbout.add("statictext", undefined, "by Muriithi Nyaga / MAGIANT CORP");
 
@@ -1731,6 +1774,31 @@ REQUIREMENTS
             } catch(eOpen) { alert("Open this URL manually:\n" + REPO_URL); }
         };
         tAbout.add("statictext", undefined, "MIT License \u2014 free to use and modify.");
+
+        var quotePanel = tAbout.add("panel", undefined, "Thought for the void");
+        quotePanel.orientation="column"; quotePanel.alignChildren=["fill","top"]; quotePanel.margins=8; quotePanel.spacing=6;
+        var QUOTES = [
+            "Life is the only free trial that starts without your consent, runs on invisible terms, and ends with a mandatory data wipe you can't negotiate.",
+            "We are all just temporary glitches in entropy's code, convinced our stack overflow errors are meaningful features.",
+            "The universe doesn't test you. It simply forgets to turn off the simulation and lets you suffer the consequences.",
+            "Life gives you just enough consciousness to notice how little control you have, then charges you rent for the awareness.",
+            "Existence is nature's way of keeping matter busy until it can recycle it without guilt.",
+            "You spend your life building a story worth telling, only to realize the audience left before the first act ended.",
+            "The great cosmic joke isn't that life is short. It's that it's long enough to make you believe it might mean something.",
+            "We are born screaming into a void that never answers, then spend decades pretending the echo was a conversation.",
+            "Life doesn't come with a save button. It only has an autosave that overwrites everything you were trying to preserve.",
+            "The only verifiable fact of existence is that it continues without you, and the silence afterward is the most honest review you'll ever receive."
+        ];
+        var quoteIdx = Math.floor(Math.random()*QUOTES.length);
+        var quoteText = quotePanel.add("statictext", [0,0,330,110], QUOTES[quoteIdx], {multiline:true});
+        try { quoteText.graphics.font = ScriptUI.newFont("dialog", ScriptUI.FontStyle.ITALIC, 11); } catch(eQF) {}
+        var quoteBtn = quotePanel.add("button", undefined, "Next quote");
+        quoteBtn.onClick = function(){ quoteIdx=(quoteIdx+1)%QUOTES.length; quoteText.text=QUOTES[quoteIdx]; };
+        // auto-advance every 5s; cancel any prior task so reopening doesn't stack them
+        try { if ($.global.__MAGSUB_QUOTE_TASK) app.cancelTask($.global.__MAGSUB_QUOTE_TASK); } catch(eQC) {}
+        $.global.__MAGSUB_QUOTE_FN = function(){ try { quoteIdx=(quoteIdx+1)%QUOTES.length; quoteText.text=QUOTES[quoteIdx]; } catch(eQT) {} };
+        $.global.__MAGSUB_QUOTE_TASK = app.scheduleTask("if($.global.__MAGSUB_QUOTE_FN)$.global.__MAGSUB_QUOTE_FN();", 5000, true);
+
 
         // ---------------- bottom utility row ----------------
         var utilGrp=win.add("group"); utilGrp.alignment=["fill","bottom"];
@@ -2031,7 +2099,19 @@ REQUIREMENTS
         };
         ffxList.onChange=function(){ ffxCustomPath=""; };
         ffxAllBtn.onClick=function(){ var p=currentFFXPath(); if (p) applyFFXToAll(p); };
-        ffxRealignBtn.onClick=function(){ var n=realignAllAnimation(); refreshCueList(); alert("Realigned animation on "+n+" cue(s) to their In points."); };
+        ffxRealignBtn.onClick=function(){ var n=realignAllAnimation(); refreshCueList(); alert(n>0?("Realigned "+n+" cue(s) to their In points."):"Nothing to realign - animation starts are already at the cue In (this is expected for presets applied in v3.7+). To shorten animations that outlast a cue, use Fit."); };
+        ffxFitAllBtn.onClick=function(){
+            var L0=toNum(ffxLenInput.text,0); setSetting("animFitLen",ffxLenInput.text); flushPrefs();
+            var n=fitAnimToCues(L0); refreshCueList();
+            alert("Fit animation on "+n+" cue(s)"+(L0>0?(" to "+L0+"s (capped at each cue's length)."):" - squeezed any that overran their cue."));
+        };
+        ffxFitSelBtn.onClick=function(){
+            var L=selectedCue(); if(!L){ alert("Select a cue on the Cues tab first."); return; }
+            var L0=toNum(ffxLenInput.text,0); setSetting("animFitLen",ffxLenInput.text); flushPrefs();
+            app.beginUndoGroup("MAG: Fit Animation (selected)");
+            try { fitCueAnim(L, L0); } finally { app.endUndoGroup(); }
+            refreshCueList(); alert("Fit animation on the selected cue.");
+        };
         ffxSelBtn.onClick=function(){
             var L=selectedCue(); if (!L) return;
             var p=currentFFXPath(); if (!p) return;

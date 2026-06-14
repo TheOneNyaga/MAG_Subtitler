@@ -2,6 +2,20 @@
 
 All notable changes to MAG Subtitler. Versions are the `SCRIPT_VERSION` string in the panel.
 
+## 3.10.1
+- Fixed the About-tab banner rendering mangled: the monospace font wasn't applying (wrong font-style argument on an edittext), so it fell back to a proportional font. Now uses a statictext with ScriptUI.FontStyle.REGULAR; dropped the 110-col one-line variant that overflowed the panel (stacked only).
+- Added a rotating dark-humour quote at the bottom of the About tab: auto-advances every 5s and has a Next button.
+
+
+## 3.10
+- New **Fit Animation to Cues** (Animate tab): anchors each cue's animation to its In point and scales the length so it finishes within the cue. Optional **Anim length (s)** field sets an explicit duration (capped at each cue's length); blank/0 squeezes only animations that outlast their cue. **Fit Selected** does one cue.
+- Realign button now reports clearly when there's nothing to realign (start already at the cue In, expected for presets applied in v3.7+).
+
+
+## 3.9.2
+- About-tab banner is now responsive: shows the full one-line TheOneNyaga when the panel is wide (>=600px), and falls back to the stacked TheOne / Nyaga when docked narrow. Switches live on resize.
+
+
 ## 3.9.1
 - About-tab banner switched to the Big Money-NE figlet font (pure ASCII), so the file no longer needs a UTF-8 BOM and the banner can't be mangled by encoding.
 

@@ -1,4 +1,4 @@
-# MAG Subtitler v3.8.1 — Usage Guide
+# MAG Subtitler v3.9 — Usage Guide
 
 A personal SRT/VTT/ASS/TXT/CSV subtitle suite for After Effects with local AI transcription and translation.
 

@@ -2,6 +2,14 @@
 
 All notable changes to MAG Subtitler. Versions are the `SCRIPT_VERSION` string in the panel.
 
+## 3.9.1
+- About-tab banner switched to the Big Money-NE figlet font (pure ASCII), so the file no longer needs a UTF-8 BOM and the banner can't be mangled by encoding.
+
+
+## 3.9
+- Added an **About** tab: Nyaga ASCII banner, version, author credit, and the GitHub repo link with an **Open Repo in Browser** button.
+
+
 ## 3.8.1
 - Added **End at Playhead** on the Cues tab: sets the selected cue's Out point to the playhead, complementing Snap to Playhead (which sets the In). Auto-resolves overlaps and renumbers.
 

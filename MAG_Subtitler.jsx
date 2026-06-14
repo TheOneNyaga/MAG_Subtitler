@@ -50,7 +50,8 @@ REQUIREMENTS
 
     // ============================ CONFIG ============================
     var SCRIPT_NAME     = "MAG Subtitler";
-    var SCRIPT_VERSION  = "3.8.1";
+    var SCRIPT_VERSION  = "3.9.1";
+    var REPO_URL        = "https://github.com/TheOneNyaga/MAG_Subtitler";
     var SETTINGS_SEC    = "MAG_Subtitler";
     var CONTROLLER_NAME = "SUB_CONTROLLER";
     var SUBCOMP_NAME    = "MAG_Subtitles";
@@ -1683,6 +1684,53 @@ REQUIREMENTS
         var llmBatch=ltRow.add("edittext",undefined,getSetting("llmBatch","15")); llmBatch.characters=3;
         var translateBtn=lGrp.add("button",undefined,"Translate All Cues In Place");
         lGrp.add("statictext",undefined,"Tip: export SRT first as a backup of the original language.");
+
+
+        // ---------------- TAB: About ----------------
+        var tAbout = tabs.add("tab", undefined, "About");
+        tAbout.orientation="column"; tAbout.alignChildren=["fill","top"]; tAbout.spacing=8; tAbout.margins=10;
+
+        var asciiLines = [
+            " /$$$$$$$$ /$$                  /$$$$$$",
+            "|__  $$__/| $$                 /$$__  $$",
+            "   | $$   | $$$$$$$   /$$$$$$ | $$  \\ $$ /$$$$$$$   /$$$$$$",
+            "   | $$   | $$__  $$ /$$__  $$| $$  | $$| $$__  $$ /$$__  $$",
+            "   | $$   | $$  \\ $$| $$$$$$$$| $$  | $$| $$  \\ $$| $$$$$$$$",
+            "   | $$   | $$  | $$| $$_____/| $$  | $$| $$  | $$| $$_____/",
+            "   | $$   | $$  | $$|  $$$$$$$|  $$$$$$/| $$  | $$|  $$$$$$$",
+            "   |__/   |__/  |__/ \\_______/ \\______/ |__/  |__/ \\_______/",
+            "",
+            " /$$   /$$",
+            "| $$$ | $$",
+            "| $$$$| $$ /$$   /$$  /$$$$$$   /$$$$$$   /$$$$$$",
+            "| $$ $$ $$| $$  | $$ |____  $$ /$$__  $$ |____  $$",
+            "| $$  $$$$| $$  | $$  /$$$$$$$| $$  \\ $$  /$$$$$$$",
+            "| $$\\  $$$| $$  | $$ /$$__  $$| $$  | $$ /$$__  $$",
+            "| $$ \\  $$|  $$$$$$$|  $$$$$$$|  $$$$$$$|  $$$$$$$",
+            "|__/  \\__/ \\____  $$ \\_______/ \\____  $$ \\_______/",
+            "           /$$  | $$           /$$  \\ $$",
+            "          |  $$$$$$/          |  $$$$$$/",
+            "           \\______/            \\______/"
+        ];
+        var asciiBox = tAbout.add("edittext", [0,0,360,235], asciiLines.join("\n"), {multiline:true, readonly:true, scrolling:true});
+        try { asciiBox.graphics.font = ScriptUI.newFont("Consolas", "REGULAR", 9); } catch(eAF) { try { asciiBox.graphics.font = ScriptUI.newFont("Courier New", "REGULAR", 9); } catch(eAF2) {} }
+
+        var aboutTitle = tAbout.add("statictext", undefined, "MAG Subtitler  v" + SCRIPT_VERSION);
+        try { aboutTitle.graphics.font = ScriptUI.newFont("dialog", "BOLD", 15); } catch(eAT) {}
+        tAbout.add("statictext", undefined, "After Effects subtitle toolkit");
+        tAbout.add("statictext", undefined, "by Muriithi Nyaga / MAGIANT CORP");
+
+        var repoPanel = tAbout.add("panel", undefined, "GitHub");
+        repoPanel.orientation="column"; repoPanel.alignChildren=["fill","top"]; repoPanel.margins=8; repoPanel.spacing=4;
+        var repoUrlBox = repoPanel.add("edittext", undefined, REPO_URL, {readonly:true});
+        var repoOpenBtn = repoPanel.add("button", undefined, "Open Repo in Browser");
+        repoOpenBtn.onClick = function(){
+            try {
+                if (File.fs === "Windows") system.callSystem('cmd.exe /c start "" "' + REPO_URL + '"');
+                else system.callSystem('open "' + REPO_URL + '"');
+            } catch(eOpen) { alert("Open this URL manually:\n" + REPO_URL); }
+        };
+        tAbout.add("statictext", undefined, "MIT License \u2014 free to use and modify.");
 
         // ---------------- bottom utility row ----------------
         var utilGrp=win.add("group"); utilGrp.alignment=["fill","bottom"];

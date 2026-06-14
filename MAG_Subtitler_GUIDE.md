@@ -1,4 +1,4 @@
-# MAG Subtitler v3.6 — Usage Guide
+# MAG Subtitler v3.8.1 — Usage Guide
 
 A personal SRT/VTT/ASS/TXT/CSV subtitle suite for After Effects with local AI transcription and translation.
 
@@ -160,7 +160,7 @@ Timing is untouched by translation — only text changes, and markers update to 
 
 ---
 
-## 4b. Split, Merge, Add (v3.5)
+\n**Manual timing by playhead (v3.8.1):** **Snap to Playhead** sets the selected cue's START to the playhead (keeping its duration); **End at Playhead** sets its END (Out) to the playhead. Together they let you time a cue by ear — park at the first word and Snap, park at the last word and End at Playhead. Both auto-resolve overlaps (the cue you moved wins) and renumber by time. Works from the main comp or inside the precomp.\n\n## 4b. Split, Merge, Add (v3.5)
 
 On the **Cues tab**, next to Add/Delete:
 
@@ -179,7 +179,7 @@ Two cues sharing screen time render on top of each other — the stacked-words a
 
 For everything else (hand-edited SRTs, old projects) the **Fix Overlaps** button on the Cues tab does a full pass, trimming every cue to end no later than the next begins.
 
-## 5b. Typography & Line Layout (v3.3)
+## 5b. Typography & Line Layout (v3.3)\n\n**Reliability note (v3.8):** After Effects does not honour live `setFontSize`/`setTracking`/`setLeading` from a text expression on all builds (AE 2026 included) — the sliders would read a value but the glyphs wouldn't change. So **font size, tracking and leading are now baked into each cue's text on Apply Style** rather than driven live. Set them in the panel (or on the controller) and click **Apply Style + Font + Shadow to All**; they update reliably. Fill colour, stroke, Y position and the drop shadow remain fully live via the controller null. Shadow colour now also works (it previously errored on a colour-dimension mismatch). Dragging the Font Size slider on the null no longer previews live — use Apply Style.\n
 
 **Tracking and Leading** live on the Style tab next to Size, and on the controller null as live sliders like everything else. Tracking is AE's letter-spacing in thousandths of an em (try 25–50 for an airy broadcast look, negative to tighten). Leading is the baseline-to-baseline distance in pixels for multi-line cues — **0 means auto** (≈120% of font size); set an explicit value when auto feels too tight or too loose for your font. Both apply live: drag the controller sliders or set values and hit Apply Style. Existing comps from older versions get the new sliders automatically the first time you Apply Style or Repair Expressions.
 
@@ -191,7 +191,7 @@ For everything else (hand-edited SRTs, old projects) the **Fix Overlaps** button
 
 Apply Layout rebuilds the cue layers (same pipeline as import), so per-cue animation overrides reset to the current Animate-tab preset — do layout *before* fine-tuning individual cues. Timings of non-split cues are untouched. Typical post-transcription order: **Transcribe → Apply Layout (2 lines, 42, split ON) → style → sync polish.**
 
-## 6. Animation: built-in presets vs AE's .ffx library
+## 6. Animation: built-in presets vs AE's .ffx library\n**Keyframe alignment (v3.7):** `.ffx` text presets applied via scripting place their keyframes at the preset's saved times (near comp start), not at the playhead — so before v3.7 every cue's animation ran at 0:00. Now keyframes are automatically shifted so the animation begins at each cue's In point. If you have an older project with animation stuck at the start, click **Realign Animation to Cue In** (Animate tab) to fix every cue in place. Built-in presets (Fade, Slide, Pop, etc.) were always anchored correctly. For correct alignment, apply an .ffx to cues that don't already carry other keyframes.\n\n
 
 Two systems, Animate tab:
 

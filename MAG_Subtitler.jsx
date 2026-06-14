@@ -50,7 +50,7 @@ REQUIREMENTS
 
     // ============================ CONFIG ============================
     var SCRIPT_NAME     = "MAG Subtitler";
-    var SCRIPT_VERSION  = "3.6";
+    var SCRIPT_VERSION  = "3.8.1";
     var SETTINGS_SEC    = "MAG_Subtitler";
     var CONTROLLER_NAME = "SUB_CONTROLLER";
     var SUBCOMP_NAME    = "MAG_Subtitles";
@@ -379,19 +379,18 @@ REQUIREMENTS
         // Index-based effect refs ((1).value) survive localisation and are the
         // most reliable resolution path. try/catch keeps the cue rendering with
         // its baked style instead of error-disabling if the controller is gone.
-        // Each setter is its own reassignment inside its own try/catch. A chained
-        // form (s.setFontSize(..).setFillColor(..)..) can drop font size on some
-        // AE builds and, worse, lets one bad setter swallow all the others.
+        // Live setters cover ONLY colour + stroke - those render reliably via the
+        // sourceText style API. Font size, tracking and leading are text-metric
+        // setters that AE does NOT honour live on all builds (AE 2026 included),
+        // so those three are BAKED into each cue's TextDocument on Apply Style
+        // instead (see bakeTextMetrics). The expression starts from the cue's
+        // current (baked) style, so the baked size/tracking/leading carry through.
         return 'var s=text.sourceText.style;\n' +
             'try{\n' +
             '  var ctl='+c+';\n' +
-            '  try{ s=s.setFontSize(ctl.effect("Font Size")(1).value); }catch(eS){}\n' +
             '  try{ var fill=ctl.effect("Font Color")(1).value; s=s.setFillColor([fill[0],fill[1],fill[2]]); }catch(eF){}\n' +
             '  try{ var sc=ctl.effect("Stroke Color")(1).value; s=s.setStrokeColor([sc[0],sc[1],sc[2]]); }catch(eC){}\n' +
             '  try{ s=s.setStrokeWidth(ctl.effect("Stroke Width")(1).value); }catch(eW){}\n' +
-            '  try{ s=s.setTracking(ctl.effect("Tracking")(1).value); }catch(eT){}\n' +
-            '  try{ var ld=ctl.effect("Leading")(1).value;\n' +
-            '       s=(ld>0)? s.setAutoLeading(false).setLeading(ld) : s.setAutoLeading(true); }catch(eL){}\n' +
             '}catch(err){}\n' +
             's;';
     }
@@ -413,7 +412,7 @@ REQUIREMENTS
         if (prop==="Distance") return 'var v=6;try{v='+c+'.effect("Shadow Distance")(1).value;}catch(err){}v;';
         if (prop==="Softness") return 'var v=8;try{v='+c+'.effect("Shadow Softness")(1).value;}catch(err){}v;';
         if (prop==="Direction") return 'var v=135;try{v='+c+'.effect("Shadow Angle")(1).value;}catch(err){}v;';
-        if (prop==="Shadow Color") return 'var v=[0,0,0];try{var k='+c+'.effect("Shadow Color")(1).value;v=[k[0],k[1],k[2]];}catch(err){}v;';
+        if (prop==="Shadow Color") return 'var v=[0,0,0,1];try{var k='+c+'.effect("Shadow Color")(1).value;v=[k[0],k[1],k[2],1];}catch(err){}v;';
         return "";
     }
 
@@ -630,13 +629,57 @@ REQUIREMENTS
         } catch (e) {}
         return out;
     }
+    // applyPreset() via scripting drops keyframes at the preset's saved absolute
+    // times (near 0), ignoring the playhead - so every cue's animation landed at
+    // comp start. We walk the layer's keyframes and shift them so the earliest
+    // lands at the target time (cue In, or playhead for Animate-Out).
+    function eachKeyedProp(root, fn) {
+        var pt; try { pt = root.propertyType; } catch (e) { return; }
+        if (pt === PropertyType.PROPERTY) {
+            var nk = 0; try { nk = root.numKeys; } catch (e2) {}
+            if (nk > 0) fn(root);
+        } else {
+            var n = 0; try { n = root.numProperties; } catch (e3) { return; }
+            for (var i = 1; i <= n; i++) { try { eachKeyedProp(root.property(i), fn); } catch (e4) {} }
+        }
+    }
+    function minKeyTimeOfLayer(L) {
+        var t = null;
+        eachKeyedProp(L, function (p) { var kt = p.keyTime(1); if (t === null || kt < t) t = kt; });
+        return t;
+    }
+    function shiftLayerKeys(L, delta) {
+        if (!delta) return;
+        eachKeyedProp(L, function (p) {
+            if (delta > 0) { for (var i = p.numKeys; i >= 1; i--) p.setKeyTime(i, p.keyTime(i) + delta); }
+            else           { for (var j = 1; j <= p.numKeys; j++) p.setKeyTime(j, p.keyTime(j) + delta); }
+        });
+    }
+    function applyPresetAt(L, f, target) {
+        // capture pre-existing earliest key so we only realign when the preset
+        // actually added keys at/near 0 (clean cue = no prior keys)
+        L.applyPreset(f);
+        var tmin = minKeyTimeOfLayer(L);
+        if (tmin !== null) shiftLayerKeys(L, target - tmin);
+    }
+    function realignAllAnimation() {
+        var subComp = findSubComp(); if (!subComp) { alert("Import first."); return 0; }
+        app.beginUndoGroup("MAG: Realign Animation to Cue In");
+        var n = 0;
+        try {
+            eachCue(subComp, function (L) {
+                var tmin = minKeyTimeOfLayer(L);
+                if (tmin !== null && Math.abs(tmin - L.inPoint) > 0.001) { shiftLayerKeys(L, L.inPoint - tmin); n++; }
+            });
+        } finally { app.endUndoGroup(); }
+        return n;
+    }
     function applyFFXToCue(L, ffxPath, atPlayhead) {
         var subComp = findSubComp(); if (!subComp) return false;
         var f = new File(ffxPath); if (!f.exists) { alert("Preset file not found:\n" + ffxPath); return false; }
         try { subComp.openInViewer(); } catch (e) {}
-        // .ffx keyframes land at the comp CTI -> park it where the animation should start
-        subComp.time = atPlayhead ? subComp.time : L.inPoint;
-        try { L.applyPreset(f); return true; }
+        var target = atPlayhead ? subComp.time : L.inPoint;
+        try { applyPresetAt(L, f, target); return true; }
         catch (e2) { alert("applyPreset failed: " + e2.toString()); return false; }
     }
     function applyFFXToAll(ffxPath) {
@@ -647,11 +690,10 @@ REQUIREMENTS
         var n = 0;
         try {
             eachCue(subComp, function (L) {
-                subComp.time = L.inPoint;
-                try { L.applyPreset(f); n++; } catch (e2) {}
+                try { applyPresetAt(L, f, L.inPoint); n++; } catch (e2) {}
             });
         } finally { app.endUndoGroup(); }
-        alert("Applied preset to " + n + " cue(s).\nNote: .ffx presets STACK - use Animation preset 'None' (Animate tab) to strip all animators before applying a different one.");
+        alert("Applied preset to " + n + " cue(s); keyframes aligned to each cue's In point.\nNote: .ffx presets STACK - use Animation preset 'None' (Animate tab) to strip animators before applying a different one. For correct alignment, apply ffx to cues that have no other keyframes.");
     }
 
     // ============================ DIAGNOSE / REPAIR ============================
@@ -686,7 +728,9 @@ REQUIREMENTS
         app.beginUndoGroup("MAG: Repair Expressions");
         var n = 0;
         try {
-            ensureController(mainComp);
+            var ctl = ensureController(mainComp);
+            var bSz=0,bTr=0,bLd=0;
+            try { bSz=ctl.effect("Font Size")(1).value; bTr=ctl.effect("Tracking")(1).value; bLd=ctl.effect("Leading")(1).value; } catch(eC){}
             eachCue(subComp, function (L) {
                 var src = L.property("ADBE Text Properties").property("ADBE Text Document");
                 src.expression = ""; src.expression = styleExpr(mainComp.name);
@@ -695,6 +739,7 @@ REQUIREMENTS
                 ensureDropShadow(L, mainComp.name);
                 n++;
             });
+            bakeTextMetrics(bSz, bTr, bLd);
         } finally { app.endUndoGroup(); }
         alert("Re-linked " + n + " cue(s) to controller '" + CONTROLLER_NAME + "' in comp '" + mainComp.name +
               "'.\nNote: slide animations were reset to static position - re-apply the animation preset if you used Slide.");
@@ -760,10 +805,34 @@ REQUIREMENTS
             ctl.effect("Y Position")(1).setValue(yPos);
             ctl.effect("Tracking")(1).setValue(toNum(tracking,0));
             ctl.effect("Leading")(1).setValue(toNum(leading,0));
+            bakeTextMetrics(fontSize, tracking, leading);   // size/tracking/leading are baked, not live
         } catch (e) { alert("Style error: "+e.toString()); }
         finally { app.endUndoGroup(); }
     }
 
+    function bakeTextMetrics(size, tracking, leading) {
+        // Write font size / tracking / leading directly into each cue's text
+        // document. Reliable where the live style expression isn't (AE 2026).
+        var subComp = findSubComp(); if (!subComp) return 0;
+        var mainComp = findMainComp();
+        var sz = toNum(size, 0), tr = toNum(tracking, 0), ld = toNum(leading, 0), n = 0;
+        eachCue(subComp, function (L) {
+            var src = L.property("ADBE Text Properties").property("ADBE Text Document");
+            var hadExpr = (src.expression !== "");
+            if (hadExpr) src.expression = "";          // edit the base doc, not the expr result
+            var doc = src.value;
+            try { if (sz > 0) doc.fontSize = sz; } catch (e1) {}
+            try { doc.tracking = tr; } catch (e2) {}
+            try {
+                if (ld > 0) { doc.autoLeading = false; doc.leading = ld; }
+                else { doc.autoLeading = true; }
+            } catch (e3) {}
+            src.setValue(doc);
+            if (hadExpr && mainComp) src.expression = styleExpr(mainComp.name);
+            n++;
+        });
+        return n;
+    }
     function applyFontToCues(fontPS) {
         if (!fontPS) return;
         var subComp = findSubComp(); if (!subComp) { alert("Import first."); return; }
@@ -931,6 +1000,21 @@ REQUIREMENTS
                 L.inPoint=ni; L.outPoint=ni+d; setCueMarker(L);
             });
         } finally { app.endUndoGroup(); }
+    }
+    function playheadInSub() {
+        var mainComp=findMainComp(), subComp=findSubComp();
+        var a=app.project.activeItem;
+        if (a===subComp && subComp) return subComp.time;
+        if (a===mainComp && subComp) { var sl=findSubLayerInMain(mainComp,subComp); return mainComp.time-(sl?sl.startTime:0); }
+        return null;
+    }
+    function extendCueToPlayhead(L) {
+        var t=playheadInSub();
+        if (t===null) { alert("Open the main comp or the precomp to use the playhead."); return false; }
+        if (t <= L.inPoint + 0.05) { alert("Move the playhead PAST the cue's start - this sets the cue's end (Out) to the playhead."); return false; }
+        app.beginUndoGroup("MAG: Extend Cue to Playhead");
+        try { L.outPoint=t; setCueMarker(L); } finally { app.endUndoGroup(); }
+        return true;
     }
     function snapCueToPlayhead(L) {
         var mainComp=findMainComp(), subComp=findSubComp();
@@ -1409,6 +1493,7 @@ REQUIREMENTS
         var updateCueBtn   = cueBtns1.add("button", undefined, "Update Cue");
         var jumpBtn        = cueBtns1.add("button", undefined, "Jump To");
         var snapBtn        = cueBtns1.add("button", undefined, "Snap to Playhead");
+        var endAtBtn       = cueBtns1.add("button", undefined, "End at Playhead");
 
         var cueBtns2 = edGrp.add("group");
         var addCueBtn    = cueBtns2.add("button", undefined, "Add Cue at Playhead");
@@ -1525,6 +1610,9 @@ REQUIREMENTS
         var ffxBtnRow=ffxGrp.add("group");
         var ffxAllBtn=ffxBtnRow.add("button",undefined,"Apply to All Cues");
         var ffxSelBtn=ffxBtnRow.add("button",undefined,"Apply to Selected Cue");
+        var ffxFixRow=ffxGrp.add("group");
+        var ffxRealignBtn=ffxFixRow.add("button",undefined,"Realign Animation to Cue In");
+        ffxFixRow.add("statictext",undefined,"(fixes keyframes stuck at comp start)");
         ffxGrp.add("statictext",undefined,"Presets stack: run preset 'None' above to strip animators first.");
 
         // ---------------- TAB: Sync ----------------
@@ -1744,6 +1832,13 @@ REQUIREMENTS
             if (sc) { var k=resolveOverlapsAround(L, sc); if (k>0) renumberCues(sc); }
             refreshCueList();
         };
+        endAtBtn.onClick=function(){
+            var L=selectedCue(); if (!L) { alert("Select a cue first."); return; }
+            if (!extendCueToPlayhead(L)) return;
+            var sc=findSubComp();
+            if (sc) { var k=resolveOverlapsAround(L, sc); if (k>0) renumberCues(sc); }
+            refreshCueList();
+        };
         addCueBtn.onClick=function(){
             var mainComp=findMainComp(), subComp=findSubComp();
             if (!subComp||!mainComp) { alert("Import (or create) the subtitle system first."); return; }
@@ -1888,6 +1983,7 @@ REQUIREMENTS
         };
         ffxList.onChange=function(){ ffxCustomPath=""; };
         ffxAllBtn.onClick=function(){ var p=currentFFXPath(); if (p) applyFFXToAll(p); };
+        ffxRealignBtn.onClick=function(){ var n=realignAllAnimation(); refreshCueList(); alert("Realigned animation on "+n+" cue(s) to their In points."); };
         ffxSelBtn.onClick=function(){
             var L=selectedCue(); if (!L) return;
             var p=currentFFXPath(); if (!p) return;

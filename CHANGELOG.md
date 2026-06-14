@@ -2,6 +2,20 @@
 
 All notable changes to MAG Subtitler. Versions are the `SCRIPT_VERSION` string in the panel.
 
+## 3.8.1
+- Added **End at Playhead** on the Cues tab: sets the selected cue's Out point to the playhead, complementing Snap to Playhead (which sets the In). Auto-resolves overlaps and renumbers.
+
+
+## 3.8
+- Fixed font size, tracking and leading not applying: AE doesn't honour these live text-metric setters via expression on all builds, so they're now baked into each cue's text document on Apply Style (and on Repair). Colour/stroke/position/shadow stay live.
+- Fixed Shadow Color doing nothing: the expression returned a 3-component colour to a 4-dimensional (RGBA) property, which AE rejected; now returns RGBA.
+
+
+## 3.7
+- Fixed `.ffx` animation keyframes all landing at comp start: scripting's applyPreset ignores the playhead, so keyframes are now shifted to begin at each cue's In point on apply.
+- New **Realign Animation to Cue In** button (Animate tab) to fix existing projects whose animation is stuck at the start, in place.
+
+
 ## 3.6
 - Fixed live font size not updating: the style expression now applies each property (size, fill, stroke, tracking, leading) as its own isolated statement instead of one chain, so font size renders reliably and one failing setter can't blank the rest. Run **Repair Expressions** on existing projects to apply.
 - Whisper **Cue start offset (s)** field with a **From selected layer** helper, to align transcribed cues that sit later on the timeline than time zero in the source file.

@@ -2,6 +2,10 @@
 
 All notable changes to MAG Subtitler. Versions are the `SCRIPT_VERSION` string in the panel.
 
+## 3.10.2
+- About-tab banner is now a pre-rendered PNG embedded in the script (decoded to a temp file and shown as an image), instead of text. This fixes the persistent mangling: AE 2026's ScriptUI was ignoring the monospace font and substituting a proportional one, which no text-based approach could survive. Falls back to a plain text title if the image can't be loaded.
+
+
 ## 3.10.1
 - Fixed the About-tab banner rendering mangled: the monospace font wasn't applying (wrong font-style argument on an edittext), so it fell back to a proportional font. Now uses a statictext with ScriptUI.FontStyle.REGULAR; dropped the 110-col one-line variant that overflowed the panel (stacked only).
 - Added a rotating dark-humour quote at the bottom of the About tab: auto-advances every 5s and has a Next button.

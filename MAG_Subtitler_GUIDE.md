@@ -1,4 +1,4 @@
-# MAG Subtitler v3.5 — Usage Guide
+# MAG Subtitler v3.6 — Usage Guide
 
 A personal SRT/VTT/ASS/TXT/CSV subtitle suite for After Effects with local AI transcription and translation.
 
@@ -114,6 +114,7 @@ On the 4090, large-v3 transcribes several times faster than realtime; turbo is n
 2. **Language:** `auto` detects; or force a code: `en`, `sw` (Swahili), `fr`, `ar`, `hi`, `zh`, `ja`, `pt`, `es`, `de`… (standard ISO-639-1, ~100 languages).
 3. Click **Transcribe Media File → Import** and pick the video/audio.
 3b. **Max segment chars** (default **84** = two 42-char lines) caps how long each whisper segment may run, splitting on word boundaries with token-level timestamps. This is the fix for whisper's default behavior of emitting one 15-second wall of text per cue. Set 42 for snappier single-line cues, 0 to restore whisper's default. Pair with Line Layout afterwards for final wrapping.
+3c. **Cue start offset (s)** shifts every transcribed cue by a fixed number of seconds on import. Use it when the speech sits later on your AE timeline than time zero in the file you transcribe — e.g. the clip is placed 10s into the comp, or whisper anchored the first cue at 00:00 over leading music/silence. Click **From selected layer** to fill it automatically from where the selected audio/video layer starts on the timeline. A uniform offset only fixes a uniform shift; if whisper mis-timed just the first cue over leading silence, delete or re-time that one cue on the Cues tab instead. 0 = no shift.
 4. A **progress window** opens: whisper runs detached in the background while AE stays responsive, with a live percentage bar (ffmpeg conversion shows first if enabled, then "Transcribing on GPU..."). **Cancel** kills the run (it force-kills any running whisper-cli process). You can keep working in AE during long transcriptions, but avoid editing the subtitle comps mid-run since the import fires when whisper finishes.
 5. **The SRT is saved next to your source media** as `<name>_whisper.srt` (e.g. `spot.mp4` → `spot_whisper.srt`) — it never overwrites an existing `<name>.srt`, and the completion alert shows the full path.
 6. The SRT then imports through the normal pipeline: precomp, controller, your current style + animation, Replace/Append mode from the Import tab.
@@ -168,6 +169,15 @@ On the **Cues tab**, next to Add/Delete:
 - **Add Cue at Playhead** — unchanged, drops a 3s placeholder cue.
 
 After any of these, cues are **automatically renumbered by time** so the list, SRT export and translation order always match the timeline.
+
+## 4c. Overlapping cues (v3.5.1)
+
+Two cues sharing screen time render on top of each other — the stacked-words artifact. Two common causes, both handled:
+
+- **Whisper `-ml` segmentation** emits slightly overlapping timestamps (≈0.2–0.5s) between consecutive segments. These are **auto-trimmed right after transcription import**; the completion alert reports how many.
+- **Snap to Playhead / Update Cue** can drop a cue onto another cue's time range. Both operations now auto-resolve: **the cue you moved wins** — earlier cues are trimmed to end where it starts, later cues start where it ends (0.1s minimum duration preserved), and cues are renumbered by time if order changed.
+
+For everything else (hand-edited SRTs, old projects) the **Fix Overlaps** button on the Cues tab does a full pass, trimming every cue to end no later than the next begins.
 
 ## 5b. Typography & Line Layout (v3.3)
 

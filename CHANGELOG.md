@@ -2,6 +2,11 @@
 
 All notable changes to MAG Subtitler. Versions are the `SCRIPT_VERSION` string in the panel.
 
+## 3.6
+- Fixed live font size not updating: the style expression now applies each property (size, fill, stroke, tracking, leading) as its own isolated statement instead of one chain, so font size renders reliably and one failing setter can't blank the rest. Run **Repair Expressions** on existing projects to apply.
+- Whisper **Cue start offset (s)** field with a **From selected layer** helper, to align transcribed cues that sit later on the timeline than time zero in the source file.
+- Hygiene pass (no functional change): verified ES3 cleanliness, no undefined calls, no duplicate definitions.
+
 ## 3.5.2
 - AI-tab fields now auto-save the instant they're edited (whisper paths, model, ffmpeg, language, max segment chars, LLM endpoint, target language, batch size).
 - Browse ("...") buttons save on pick.

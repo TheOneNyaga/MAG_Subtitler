@@ -50,7 +50,7 @@ REQUIREMENTS
 
     // ============================ CONFIG ============================
     var SCRIPT_NAME     = "MAG Subtitler";
-    var SCRIPT_VERSION  = "3.5";
+    var SCRIPT_VERSION  = "3.6";
     var SETTINGS_SEC    = "MAG_Subtitler";
     var CONTROLLER_NAME = "SUB_CONTROLLER";
     var SUBCOMP_NAME    = "MAG_Subtitles";
@@ -151,6 +151,15 @@ REQUIREMENTS
         return subs;
     }
     function parseVTT(content) { return parseSRT(String(content).replace(/^WEBVTT[^\n]*\n/, "")); }
+    function shiftSubs(subs, off) {
+        off = toNum(off, 0);
+        if (!off) return subs;
+        for (var i = 0; i < subs.length; i++) {
+            subs[i].start = Math.max(0, subs[i].start + off);
+            subs[i].end   = Math.max(subs[i].start + 0.05, subs[i].end + off);
+        }
+        return subs;
+    }
 
     function parseASS(content) {
         var subs = [];
@@ -370,18 +379,19 @@ REQUIREMENTS
         // Index-based effect refs ((1).value) survive localisation and are the
         // most reliable resolution path. try/catch keeps the cue rendering with
         // its baked style instead of error-disabling if the controller is gone.
+        // Each setter is its own reassignment inside its own try/catch. A chained
+        // form (s.setFontSize(..).setFillColor(..)..) can drop font size on some
+        // AE builds and, worse, lets one bad setter swallow all the others.
         return 'var s=text.sourceText.style;\n' +
             'try{\n' +
             '  var ctl='+c+';\n' +
-            '  var fill=ctl.effect("Font Color")(1).value;\n' +
-            '  var sc=ctl.effect("Stroke Color")(1).value;\n' +
-            '  s=s.setFontSize(ctl.effect("Font Size")(1).value)\n' +
-            '     .setFillColor([fill[0],fill[1],fill[2]])\n' +
-            '     .setStrokeColor([sc[0],sc[1],sc[2]])\n' +
-            '     .setStrokeWidth(ctl.effect("Stroke Width")(1).value);\n' +
-            '  try{s=s.setTracking(ctl.effect("Tracking")(1).value);}catch(e2){}\n' +
-            '  try{var ld=ctl.effect("Leading")(1).value;\n' +
-            '      s=(ld>0)? s.setAutoLeading(false).setLeading(ld) : s.setAutoLeading(true);}catch(e3){}\n' +
+            '  try{ s=s.setFontSize(ctl.effect("Font Size")(1).value); }catch(eS){}\n' +
+            '  try{ var fill=ctl.effect("Font Color")(1).value; s=s.setFillColor([fill[0],fill[1],fill[2]]); }catch(eF){}\n' +
+            '  try{ var sc=ctl.effect("Stroke Color")(1).value; s=s.setStrokeColor([sc[0],sc[1],sc[2]]); }catch(eC){}\n' +
+            '  try{ s=s.setStrokeWidth(ctl.effect("Stroke Width")(1).value); }catch(eW){}\n' +
+            '  try{ s=s.setTracking(ctl.effect("Tracking")(1).value); }catch(eT){}\n' +
+            '  try{ var ld=ctl.effect("Leading")(1).value;\n' +
+            '       s=(ld>0)? s.setAutoLeading(false).setLeading(ld) : s.setAutoLeading(true); }catch(eL){}\n' +
             '}catch(err){}\n' +
             's;';
     }
@@ -484,6 +494,36 @@ REQUIREMENTS
         for (i = 0; i < arr.length; i++) arr[i].name = "MAGTMP_" + (i + 1);
         for (i = 0; i < arr.length; i++) { arr[i].name = LAYER_PREFIX + pad(i + 1, 4); setCueMarker(arr[i]); }
         return arr.length;
+    }
+    function fixAllOverlaps(subComp) {
+        // Trim each cue so it ends no later than the next cue starts.
+        // Whisper's -ml segmentation routinely emits ~0.2-0.5s overlaps.
+        var arr = getCuesByTime(subComp), n = 0;
+        for (var i = 0; i < arr.length - 1; i++) {
+            if (arr[i].outPoint > arr[i+1].inPoint + 0.001) {
+                arr[i].outPoint = Math.max(arr[i].inPoint + 0.1, arr[i+1].inPoint);
+                setCueMarker(arr[i]);
+                n++;
+            }
+        }
+        return n;
+    }
+    function resolveOverlapsAround(L, subComp) {
+        // After snapping/retiming a cue, the MOVED CUE WINS: any cue that now
+        // overlaps it is trimmed (earlier cues end at L.in, later cues start
+        // at L.out, keeping a 0.1s minimum duration).
+        var n = 0;
+        eachCue(subComp, function(o){
+            if (o === L) return;
+            if (o.inPoint < L.inPoint && o.outPoint > L.inPoint + 0.001) {
+                o.outPoint = Math.max(o.inPoint + 0.1, L.inPoint); setCueMarker(o); n++;
+            } else if (o.inPoint >= L.inPoint && o.inPoint < L.outPoint - 0.001) {
+                o.inPoint = L.outPoint;                       // starts later, keeps its end
+                if (o.outPoint < o.inPoint + 0.1) o.outPoint = o.inPoint + 0.1;
+                setCueMarker(o); n++;
+            }
+        });
+        return n;
     }
     function flatCueText(L) {
         return trim(String(getCueText(L)).replace(/[\r\n\x03]+/g, " ").replace(/\s+/g, " "));
@@ -1365,6 +1405,7 @@ REQUIREMENTS
 
         var cueBtns1 = edGrp.add("group");
         var refreshCuesBtn = cueBtns1.add("button", undefined, "Refresh List");
+        var fixOvBtn       = cueBtns1.add("button", undefined, "Fix Overlaps");
         var updateCueBtn   = cueBtns1.add("button", undefined, "Update Cue");
         var jumpBtn        = cueBtns1.add("button", undefined, "Jump To");
         var snapBtn        = cueBtns1.add("button", undefined, "Snap to Playhead");
@@ -1535,6 +1576,10 @@ REQUIREMENTS
         wlRow.add("statictext",undefined,"Max segment chars:");
         var whisperMaxLen=wlRow.add("edittext",undefined,getSetting("whisperMaxLen","84")); whisperMaxLen.characters=5;
         wlRow.add("statictext",undefined,"(0 = whisper default)");
+        var woRow=wGrp.add("group"); woRow.add("statictext",undefined,"Cue start offset (s):");
+        var whisperOffset=woRow.add("edittext",undefined,getSetting("whisperOffset","0")); whisperOffset.characters=8;
+        var woFromLayerBtn=woRow.add("button",undefined,"From selected layer");
+        woRow.add("statictext",undefined,"(added to every cue)");
         var transcribeBtn=wGrp.add("button",undefined,"Transcribe Media File -> Import");
 
         var lGrp=tAI.add("panel",undefined,"Translate (local LLM)");
@@ -1547,7 +1592,7 @@ REQUIREMENTS
         var ltRow=lGrp.add("group"); ltRow.add("statictext",undefined,"Target language:");
         var llmLang=ltRow.add("edittext",undefined,getSetting("llmLang","Swahili")); llmLang.characters=14;
         ltRow.add("statictext",undefined,"batch:");
-        var llmBatch=ltRow.add("edittext",undefined,"15"); llmBatch.characters=3;
+        var llmBatch=ltRow.add("edittext",undefined,getSetting("llmBatch","15")); llmBatch.characters=3;
         var translateBtn=lGrp.add("button",undefined,"Translate All Cues In Place");
         lGrp.add("statictext",undefined,"Tip: export SRT first as a backup of the original language.");
 
@@ -1558,6 +1603,25 @@ REQUIREMENTS
         var removeBtn=utilGrp.add("button",undefined,"Remove All");
 
         // ============================ UI HELPERS ============================
+        function flushPrefs() {
+            // app.settings lives in AE's prefs file, which is normally written
+            // only on clean exit - a crash/force-kill loses everything typed.
+            // saveToDisk() flushes immediately.
+            try { app.preferences.saveToDisk(); } catch (e) {}
+        }
+        function persistField(field, key) {
+            field.onChange = function(){ setSetting(key, field.text); flushPrefs(); };
+        }
+        persistField(whisperExe,   "whisperExe");
+        persistField(whisperModel, "whisperModel");
+        persistField(ffmpegPath,   "ffmpegPath");
+        persistField(whisperLang,  "whisperLang");
+        persistField(whisperMaxLen,"whisperMaxLen");
+        persistField(whisperOffset,"whisperOffset");
+        persistField(llmEndpoint,  "llmEndpoint");
+        persistField(llmLang,      "llmLang");
+        persistField(llmBatch,     "llmBatch");
+        // llmKey is deliberately NOT persisted: no credentials in plaintext prefs.
         function uiFontPS() {
             if (!fontList.selection) return null;
             return fontData[fontList.selection.index] ? fontData[fontList.selection.index].ps : null;
@@ -1592,6 +1656,7 @@ REQUIREMENTS
             setSetting("tracking", trackInput.text);
             setSetting("leading", leadInput.text);
             var fps=uiFontPS(); if (fps) setSetting("fontPS", fps);
+            flushPrefs();
         }
 
         var cueLayersCache=[];
@@ -1632,6 +1697,13 @@ REQUIREMENTS
         };
 
         refreshCuesBtn.onClick=refreshCueList;
+        fixOvBtn.onClick=function(){
+            var sc=findSubComp(); if (!sc) { alert("Import first."); return; }
+            app.beginUndoGroup("MAG: Fix Overlaps");
+            try { var n=fixAllOverlaps(sc); } finally { app.endUndoGroup(); }
+            refreshCueList();
+            alert(n+" overlapping cue(s) trimmed.");
+        };
         cueList.onChange=function(){
             if (!cueList.selection) return;
             var L=cueLayersCache[cueList.selection.index]; if (!L) return;
@@ -1650,6 +1722,8 @@ REQUIREMENTS
                 L.inPoint=ni; L.outPoint=no;
                 setCueText(L, edText.text, mainComp?mainComp.name:null);
                 setCueMarker(L);
+                var sc=findSubComp();
+                if (sc) { var k=resolveOverlapsAround(L, sc); if (k>0) renumberCues(sc); }
             } finally { app.endUndoGroup(); }
             refreshCueList();
         };
@@ -1663,7 +1737,13 @@ REQUIREMENTS
                 mainComp.time=L.inPoint+(sl?sl.startTime:0);
             } else if (subComp) { subComp.openInViewer(); subComp.time=L.inPoint; }
         };
-        snapBtn.onClick=function(){ var L=selectedCue(); if (L) { snapCueToPlayhead(L); refreshCueList(); } };
+        snapBtn.onClick=function(){
+            var L=selectedCue(); if (!L) return;
+            snapCueToPlayhead(L);
+            var sc=findSubComp();
+            if (sc) { var k=resolveOverlapsAround(L, sc); if (k>0) renumberCues(sc); }
+            refreshCueList();
+        };
         addCueBtn.onClick=function(){
             var mainComp=findMainComp(), subComp=findSubComp();
             if (!subComp||!mainComp) { alert("Import (or create) the subtitle system first."); return; }
@@ -1824,9 +1904,19 @@ REQUIREMENTS
         mirrorBtn.onClick=mirrorMarkersToMain;
         applyMainBtn.onClick=function(){ applyMainMarkersToCues(); refreshCueList(); };
 
-        weBtn.onClick=function(){ var f=File.openDialog("Locate whisper-cli executable"); if (f) whisperExe.text=f.fsName; };
-        wmBtn.onClick=function(){ var f=File.openDialog("Locate whisper ggml model (.bin)"); if (f) whisperModel.text=f.fsName; };
-        wfBtn.onClick=function(){ var f=File.openDialog("Locate ffmpeg executable"); if (f) ffmpegPath.text=f.fsName; };
+        weBtn.onClick=function(){ var f=File.openDialog("Locate whisper-cli executable"); if (f) { whisperExe.text=f.fsName; setSetting("whisperExe",f.fsName); flushPrefs(); } };
+        wmBtn.onClick=function(){ var f=File.openDialog("Locate whisper ggml model (.bin)"); if (f) { whisperModel.text=f.fsName; setSetting("whisperModel",f.fsName); flushPrefs(); } };
+        wfBtn.onClick=function(){ var f=File.openDialog("Locate ffmpeg executable"); if (f) { ffmpegPath.text=f.fsName; setSetting("ffmpegPath",f.fsName); flushPrefs(); } };
+        woFromLayerBtn.onClick=function(){
+            var a=app.project.activeItem;
+            if (!a || !(a instanceof CompItem) || !a.selectedLayers || a.selectedLayers.length===0) {
+                alert("Select the audio/video layer in your comp first, then click this.\nIt reads where that layer starts on the timeline and uses it as the offset."); return;
+            }
+            var L=a.selectedLayers[0];
+            var off=(L.inPoint!=null)?L.inPoint:L.startTime;
+            whisperOffset.text=String(Math.round(off*1000)/1000);
+            setSetting("whisperOffset",whisperOffset.text); flushPrefs();
+        };
 
         transcribeBtn.onClick=function(){
             if (trim(whisperExe.text)===""||trim(whisperModel.text)==="") { alert("Set whisper-cli and model paths first."); return; }
@@ -1835,17 +1925,21 @@ REQUIREMENTS
             setSetting("whisperExe",whisperExe.text); setSetting("whisperModel",whisperModel.text);
             setSetting("ffmpegPath",ffmpegPath.text); setSetting("whisperLang",whisperLang.text);
             setSetting("whisperMaxLen",whisperMaxLen.text);
+            setSetting("whisperOffset",whisperOffset.text);
+            flushPrefs();
             transcribeBtn.enabled=false;
+            var offNow=toNum(whisperOffset.text,0);
             startTranscribeAsync({
                 media: media.fsName, whisperExe: whisperExe.text, modelPath: whisperModel.text,
                 ffmpegPath: ffmpegPath.text, language: whisperLang.text, maxLen: whisperMaxLen.text
             }, function(content, srtPath){
                 transcribeBtn.enabled=true;
-                var subs=parseSRT(content);
+                var subs=shiftSubs(parseSRT(content), offNow);
                 var n=importParsed(subs, uiFontPS(), uiAnim(), replaceRb.value);
                 if (n>0) {
+                    var sc=findSubComp(), fixed=sc?fixAllOverlaps(sc):0;
                     applyAllStyle(); refreshCueList();
-                    alert("Transcribed and imported "+n+" cue(s).\n\nSRT saved to:\n"+srtPath);
+                    alert("Transcribed and imported "+n+" cue(s)."+(fixed>0?"\n("+fixed+" whisper segment overlap(s) auto-trimmed.)":"")+"\n\nSRT saved to:\n"+srtPath);
                 } else {
                     alert("Transcription finished but no cues were imported.\nSRT saved to:\n"+srtPath);
                 }
